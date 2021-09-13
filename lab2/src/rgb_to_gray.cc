@@ -1,5 +1,3 @@
-/*  For description look into the help() function. */
-
 #include "opencv2/core/core.hpp"
 #include "opencv2/highgui/highgui.hpp"
 
@@ -66,7 +64,7 @@ int main(int argc,char** argv)
 	}
 
 	Mat rgb_image;
-	rgb_image = imread(argv[1], CV_LOAD_IMAGE_COLOR);
+	rgb_image = imread(argv[1], IMREAD_COLOR);
 	if (!rgb_image.data) {
 		cout << "Could not open the image" << endl;
 		return -1;
