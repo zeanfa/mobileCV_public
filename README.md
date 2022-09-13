@@ -18,7 +18,22 @@ https://jkjung-avt.github.io/setting-up-nano/
 Swap can also be set with **jtop**
 
 ### PyTorch and Torchvision setup  
-https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-6-0-now-available/72048
+https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-6-0-now-available/72048  
+
+### Screen resolution fix:
+sudo gedit /etc/X11/xorg.conf
+——————————————————————-
+Section "Screen"
+Identifier "Screen0"
+Monitor    "Monitor0"
+    SubSection "Display"
+    Viewport   0 0
+    Modes "1280x1024"
+    Depth   24 
+    Virtual 1280 1024
+EndSubSection
+EndSection
+———————————————————————
 
 ### Report spec  
 1. Титульный лист  
