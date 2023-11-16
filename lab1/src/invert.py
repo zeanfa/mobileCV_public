@@ -43,18 +43,28 @@ def gstreamer_pipeline(
 
 def show_camera():
     # To flip the image, modify the flip_method parameter (0 and 2 are the most common)
-    print(gstreamer_pipeline(flip_method=4))
-    cap = cv2.VideoCapture(gstreamer_pipeline(flip_method=4), cv2.CAP_GSTREAMER)
+    #print(gstreamer_pipeline(flip_method=4))
+    cap = cv2.VideoCapture(0) # gstreamer_pipeline(flip_method=4), cv2.CAP_GSTREAMER)
     if cap.isOpened():
         window_handle = cv2.namedWindow("CSI Camera", cv2.WINDOW_AUTOSIZE)
         # Window
         while cv2.getWindowProperty("CSI Camera", 0) >= 0:
             ret_val, frame = cap.read()
 
-            invert = ~frame
+            img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            thresh1 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 199, 5)
+            thresh2 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 99, 5)
+            thresh3 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 5)
+            thresh4 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 399, 5)
 
             # Show video
-            cv2.imshow('Inverted', invert)
+            cv2.imshow('Original', frame)
+            cv2.imshow('Adaptive mean 199', thresh1)
+            cv2.imshow('Adaptive mean 99', thresh2)
+            cv2.imshow('Adaptive mean 9', thresh3)
+            cv2.imshow('Adaptive mean 399', thresh4)
+
             # This also acts as
             keyCode = cv2.waitKey(1) & 0xFF
             # Stop the program on the ESC key
