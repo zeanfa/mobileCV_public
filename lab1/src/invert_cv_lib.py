@@ -5,7 +5,7 @@
 # denisov@itmo.ru
 
 import cv2
-import numpy as np
+import time
 
 # gstreamer_pipeline returns a GStreamer pipeline for capturing from the CSI camera
 # Defaults to 1280x720 @ 60fps
@@ -41,42 +41,57 @@ def gstreamer_pipeline(
     )
 
 
-def show_camera():
-    # To flip the image, modify the flip_method parameter (0 and 2 are the most common)
-    #print(gstreamer_pipeline(flip_method=4))
-    cap = cv2.VideoCapture(0) # gstreamer_pipeline(flip_method=4), cv2.CAP_GSTREAMER)
+def show_video():
+    cap = cv2.VideoCapture('lab1_10s.mp4')
+    need_save = True
 
-    if cap.isOpened():
-        window_handle = cv2.namedWindow("CSI Camera")#, cv2.WINDOW_AUTOSIZE)
+    number_of_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) * 2
+    start_time = time.perf_counter()
+    width = cap.get(3)
+    height = cap.get(4)
 
-        # Window
-        while cv2.getWindowProperty("CSI Camera", 0) >= 0:
+    while cap.isOpened():
+        try:
             ret_val, frame = cap.read()
 
             img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            thresh1 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 199, 5)
-            thresh2 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 99, 5)
-            thresh3 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 5)
-            thresh4 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 399, 5)
+            thresh9 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 5)
+            thresh299 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 299, 5)
 
             # Show video
             cv2.imshow('Original', frame)
-            cv2.imshow('Adaptive mean 199', thresh1)
-            cv2.imshow('Adaptive mean 99', thresh2)
-            cv2.imshow('Adaptive mean 9', thresh3)
-            cv2.imshow('Adaptive mean 399', thresh4)
+            cv2.imshow('Adaptive mean 9', thresh9)
+            cv2.imshow('Adaptive mean 299', thresh299)
 
-            # This also acts as
+            if need_save:
+                cv2.imwrite('cv2_original.jpg', img)
+                cv2.imwrite('cv2_adaptive_9.jpg', thresh9)
+                cv2.imwrite('cv2_adaptive_299.jpg', thresh299)
+                need_save = False
+
+            # cv2.imshow('Adaptive mean 9', thresh3)
+            # cv2.imshow('Adaptive mean 399', thresh4)
             keyCode = cv2.waitKey(1) & 0xFF
             # Stop the program on the ESC key
             if keyCode == 27:
                 break
-        cap.release()
-        cv2.destroyAllWindows()
-    else:
-        print("Unable to open camera")
+        except:
+            cap.release()
+            # cv2.destroyAllWindows()
 
+    end_time = time.perf_counter()
+    result = f"""
+    Frame resolution: {width} х {height}
+    Execution time: {end_time - start_time:.4f}s
+    Number of frames: {number_of_frames:.4f}
+    Frames per second: {number_of_frames / (end_time - start_time):.4f}
+    Second for one frame: {(end_time - start_time) / number_of_frames:.4f}"""
+
+    with open('cv_lib_results.txt', 'w') as f:
+        f.write(result)
+
+    print(result)
 
 if __name__ == "__main__":
-    show_camera()
+    show_video()
