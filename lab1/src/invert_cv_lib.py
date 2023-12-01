@@ -5,7 +5,6 @@
 # denisov@itmo.ru
 
 import cv2
-import numpy as np
 import time
 
 # gstreamer_pipeline returns a GStreamer pipeline for capturing from the CSI camera
@@ -42,31 +41,11 @@ def gstreamer_pipeline(
     )
 
 
-def my_adaptive_thresh_mean(img, region, C=5):
-    max_r = img.shape[0]
-    max_c = img.shape[1]
-    half_region = (region - 1) / 2
-    res_img = []
-    for r in range(max_r):
-        new_line = []
-        start_r = int(0 if (r - half_region) < 0 else r - half_region)
-        end_r = int(r + half_region if (r + half_region) < max_r else max_r)
-        for c in range(max_c):
-            start_c = int(0 if (c - half_region) < 0 else c - half_region)
-            end_c = int(c + half_region if (c + half_region) < max_c else max_c)
-            region = img[start_r:end_r, start_c:end_c]
-            treshold = region.mean() + C
-            adaptive = 255 if img[r, c] < treshold else 0
-            new_line.append(np.uint8(adaptive))
-        res_img.append(new_line)
-    return np.array(res_img)
-
-
 def show_video():
     cap = cv2.VideoCapture('lab1_10s.mp4')
     need_save = True
 
-    number_of_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    number_of_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) * 2
     start_time = time.perf_counter()
     width = cap.get(3)
     height = cap.get(4)
@@ -77,20 +56,22 @@ def show_video():
 
             img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
+            thresh9 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 5)
+            thresh299 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 299, 5)
+
             # Show video
             cv2.imshow('Original', frame)
-
-            numpy_thresh9 = my_adaptive_thresh_mean(img, 9, 5)
-            cv2.imshow('Numpy Adaptiv lab 9', numpy_thresh9)
-
-            numpy_thresh299 = my_adaptive_thresh_mean(img, 299, 5)
-            cv2.imshow('Numpy Adaptiv lab 299', numpy_thresh299)
+            cv2.imshow('Adaptive mean 9', thresh9)
+            cv2.imshow('Adaptive mean 299', thresh299)
 
             if need_save:
-                cv2.imwrite('numpy_adaptive_9.jpg', numpy_thresh9)
-                cv2.imwrite('numpy_adaptive_299.jpg', numpy_thresh299)
+                cv2.imwrite('cv2_original.jpg', img)
+                cv2.imwrite('cv2_adaptive_9.jpg', thresh9)
+                cv2.imwrite('cv2_adaptive_299.jpg', thresh299)
                 need_save = False
 
+            # cv2.imshow('Adaptive mean 9', thresh3)
+            # cv2.imshow('Adaptive mean 399', thresh4)
             keyCode = cv2.waitKey(1) & 0xFF
             # Stop the program on the ESC key
             if keyCode == 27:
@@ -107,11 +88,10 @@ def show_video():
     Frames per second: {number_of_frames / (end_time - start_time):.4f}
     Second for one frame: {(end_time - start_time) / number_of_frames:.4f}"""
 
-    with open('numpy_lib_results.txt', 'w') as f:
+    with open('cv_lib_results.txt', 'w') as f:
         f.write(result)
 
     print(result)
-
 
 if __name__ == "__main__":
     show_video()
