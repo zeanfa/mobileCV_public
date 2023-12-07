@@ -1,88 +1,102 @@
-# Лабораторная работа 1
+# Лабораторная работа 2
 
 ## Цель
-Научиться реализовывать один из простых алгоритмов обработки изображения
+Изучить основы оптимизации и векторизации алгоритмов компьютерного зрения на базе процессорной системы ARM Cortex A57 MPCore + NEON.
 
 ## Вариант
-Бинаризация с адаптивным порогом
+Уменьшение насыщенности изображения (взвешенное суммированиес grayscale)
 
 ## Теория
-Метод бинаризации с адаптивным порогом - это метод обработки изображений, который позволяет автоматически находить пороговое значение для каждого пикселя или области пикселей в изображении. Этот метод особенно полезен в случаях, когда освещение на изображении неоднородно или когда фоновый уровень яркости переменен, в результате чего использование фиксированного порогового значения приводит к неудовлетворительным результатам.
+Уменьшение насыщенности изображения (взвешенное суммирование в grayscale) - это процесс изменения яркости и насыщенности цветов в изображении, чтобы оно выглядело менее насыщенным и более монохромным. В этом процессе каждый пиксель изображения преобразуется в оттенки серого, используя определенные веса для каждого канала цвета. Затем значения RGB-каналов умножаются на соответствующие веса и складываются, чтобы получить новое значение яркости пикселя. 
 
-Основная идея метода бинаризации с адаптивным порогом заключается в том, чтобы вычислить порог для каждой области изображения, основываясь на локальной структуре яркости в этой области. Это позволяет адаптировать порог к местным особенностям изображения, что делает его более гибким и способным к обработке разнообразных сценариев.
-
-Существует несколько способов реализации адаптивной бинаризации. Некоторые из самых популярных методов включают вычисление порога на основе среднего или медианного значения интенсивности пикселей в окрестности каждого пикселя, использование методов гауссовской фильтрации для выделения текстурных особенностей
+Этот процесс применяется к каждому пикселю изображения, чтобы получить новое изображение с меньшей насыщенностью и более монохромным видом.
 
 ## Описание программы
 
-### Алгоритм бинаризации с адаптивным порогом с помощью Numpy
-1. Пребразование изображение в оттенки серого, бинаризация и создание ядра аналогично предыдущему способу
-2. Реализация алгоритма:
+### Алгоритм уменьшение насыщенности
+1. Без векторизации:
 ```
-def my_adaptive_thresh_mean(img, region, C=5):
-    max_r = img.shape[0]
-    max_c = img.shape[1]
-    half_region = (region - 1) / 2
-    res_img = []
-    for r in range(max_r):
-        new_line = []
-        start_r = int(0 if (r - half_region) < 0 else r - half_region)
-        end_r = int(r + half_region if (r + half_region) < max_r else max_r)
-        for c in range(max_c):
-            start_c = int(0 if (c - half_region) < 0 else c - half_region)
-            end_c = int(c + half_region if (c + half_region) < max_c else max_c)
-            region = img[start_r:end_r, start_c:end_c]
-            treshold = region.mean() + C
-            adaptive = 255 if img[r, c] < treshold else 0
-            new_line.append(np.uint8(adaptive))
-        res_img.append(new_line)
-    return np.array(res_img)
+        void rgb_with_graymask(const uint8_t* rgb, uint8_t* reduced, int num_pixels, int gr_weight)
+        {
+            	auto t1 = chrono::high_resolution_clock::now();
+                gr_weight = gr_weight % 256;
+                int img_weight = 255 - gr_weight;
+
+            	for(int i=0; i<num_pixels; i+=3, rgb+=3) {
+            		int v = (rgb[0] + rgb[1] + rgb[2])/3;
+                    reduced[i] = (img_weight*rgb[0] + gr_weight*v) >> 8;
+                    reduced[i+1] = (img_weight*rgb[1] + gr_weight*v) >> 8;
+                    reduced[i+2] = (img_weight*rgb[2] + gr_weight*v) >> 8; 
+            	}
+            	auto t2 = chrono::high_resolution_clock::now();
+            	auto duration = chrono::duration_cast<chrono::microseconds>(t2-t1).count();
+            	cout << "rgb_with_graymask\t" << to_string(gr_weight) << "\t" << duration << endl;
+        }
+```
+
+2. С векторизацией:
+```
+    void rgb_with_graymask_neon8(const uint8_t* rgb, uint8_t* reduced, int num_pixels, int gr_weight) {
+        gr_weight = gr_weight % 256;
+        int img_weight = 255 - gr_weight;
+        	num_pixels /= 8;
+        	uint8x8_t gr_w = vdup_n_u8(gr_weight);
+        	uint8x8_t img_w = vdup_n_u8(img_weight);
+        	uint8x8_t w_gr = vdup_n_u8(85);
+
+        	uint16x8_t temp;
+        	uint8x8_t temp_result;
+        	auto t1_neon = chrono::high_resolution_clock::now();
+        	for(int i=0; i<num_pixels; i+=3, rgb+=8*3, reduced+=8*3) {
+                uint8x8x3_t src = vld3_u8(rgb);
+                temp = vmull_u8(src.val[0], w_gr);
+                temp = vmlal_u8(temp, src.val[1], w_gr);
+                temp = vmlal_u8(temp, src.val[2], w_gr);
+                temp_result = vshrn_n_u16(temp, 8);
+
+                src.val[0] = vshrn_n_u16(
+                        vmull_u8(src.val[0], img_w) + vmull_u8(temp_result, gr_w), 8);
+                src.val[1] = vshrn_n_u16(
+                        vmull_u8(src.val[1], img_w) + vmull_u8(temp_result, gr_w), 8);
+                src.val[2] = vshrn_n_u16(
+                        vmull_u8(src.val[2], img_w) + vmull_u8(temp_result, gr_w), 8);
+
+                vst3_u8(reduced, src);
+        	}
+        	auto t2_neon = chrono::high_resolution_clock::now();
+        	auto duration_neon = chrono::duration_cast<chrono::microseconds>(t2_neon-t1_neon).count();
+        	cout << "rgb_with_graymask_neon8\t" << to_string(gr_weight) << "\t" << duration_neon << endl;
+    }
 ```
 
 ## Результаты
-Кадр исходного видео:
-![image](../img/cv2_original.jpg)
 
-Результат применения CV2 бинаризации с порогом 9:
-![image](../img/cv2_adaptive_9.jpg)
+512х512px
 
-Результат применения собственного алгоритма бинаризации Numpy с порогом 9:
-![image](../img/numpy_adaptive_9.jpg)
+|  Исходное                       | 50                                             | 150                                             | 250                                             |
+|---------------------------------|------------------------------------------------|-------------------------------------------------|-------------------------------------------------|
+| ![image](./imgs/lenna/Lenna.png)| ![image](./imgs/lenna/graymask_img_50.png)     | ![image](./imgs/lenna/graymask_img_150.png)     | ![image](./imgs/lenna/graymask_img_250.png)     |
+| ![image](./imgs/lenna/Lenna.png)| ![image](./imgs/lenna/graymask_img_neon_50.png)| ![image](./imgs/lenna/graymask_img_neon_150.png)| ![image](./imgs/lenna/graymask_img_neon_250.png)|
 
-Результат применения CV2 бинаризации с порогом 299:
-![image](../img/cv2_adaptive_299.jpg)
 
-Результат применения собственного алгоритма бинаризации Numpy с порогом 299: 
-![image](../img/numpy_adaptive_299.jpg)
+1280х720px
 
-Сравнение производительности алгоритмов
+|  Исходное                       | 50                                             | 150                                             | 250                                             |
+|---------------------------------|------------------------------------------------|-------------------------------------------------|-------------------------------------------------|
+| ![image](./imgs/tree/tree.png)| ![image](./imgs/tree/graymask_img_50.png)     | ![image](./imgs/tree/graymask_img_150.png)     | ![image](./imgs/tree/graymask_img_250.png)     |
+| ![image](./imgs/tree/tree.png)| ![image](./imgs/tree/graymask_img_neon_50.png)| ![image](./imgs/tree/graymask_img_neon_150.png)| ![image](./imgs/tree/graymask_img_neon_250.png)|
 
-1) Алгоритм CV2
 
-```
-    Frame resolution: 1238.0 х 554.0
-    Execution time: 11.4314s
-    Number of frames: 550.0000
-    Frames per second: 48.1130
-    Second for one frame: 0.0208
-```
+Время выполнения преобразования в зависимости от уровня оптимизации компиляции О:
 
-2) Собственный алгоритм Numpy
+512х512px
 
-```
-=======
+![image](./imgs/lenna/lenna_chart.png)
 
-2) Собственный алгоритм Numpy
 
-```
-    Frame resolution: 1238.0 х 554.0
-    Execution time: 34799.6202s
-    Number of frames: 275.0000
-    Frames per second: 0.0079
-    Second for one frame: 126.5441
+1280х720px
 
-```
-
+![image](./imgs/tree/tree_chart.png)
 
 ## Вывод
-В результате выполнения лабораторной работы удалось ознакомиться с процессом работы платформы Jetson и реализовать метод бинаризации с адаптивным порогом. Также проведено сравнение производительности существующего алгоритма бинаризации в библиотеке CV2 и собственного. Производительность разработанного алгоритма с помощью Numpy уступает CV2 в несколько раз.
+В результате выполнения лабораторной работы удалось ознакомиться с возможностью векторной обработки изображений на процессоре ARM
