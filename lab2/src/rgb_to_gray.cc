@@ -8,63 +8,70 @@
 using namespace std;
 using namespace cv;
 
-void rgb_to_gray(const uint8_t* rgb, uint8_t* gray, int num_pixels)
+void rgb_with_graymask(const uint8_t* rgb, uint8_t* reduced, int num_pixels, int gr_weight)
 {
-	cout << "inside function rgb_to_gray" << endl;
 	auto t1 = chrono::high_resolution_clock::now();
-	for(int i=0; i<num_pixels; ++i, rgb+=3) {
-		int v = (77*rgb[0] + 150*rgb[1] + 29*rgb[2]);
-		gray[i] = v>>8;
+    gr_weight = gr_weight % 256;
+    int img_weight = 255 - gr_weight;
+
+	for(int i=0; i<num_pixels; i+=3, rgb+=3) {
+		int v = (rgb[0] + rgb[1] + rgb[2])/3;
+        reduced[i] = (img_weight*rgb[0] + gr_weight*v) >> 8;
+        reduced[i+1] = (img_weight*rgb[1] + gr_weight*v) >> 8;
+        reduced[i+2] = (img_weight*rgb[2] + gr_weight*v) >> 8; 
 	}
 	auto t2 = chrono::high_resolution_clock::now();
 	auto duration = chrono::duration_cast<chrono::microseconds>(t2-t1).count();
-	cout << duration << " us" << endl;
+	cout << "rgb_with_graymask\t" << to_string(gr_weight) << "\t" << duration << endl;
 }
 
-void rgb_to_gray_neon(const uint8_t* rgb, uint8_t* gray, int num_pixels) {
-	// We'll use 64-bit NEON registers to process 8 pixels in parallel.
+void rgb_with_graymask_neon8(const uint8_t* rgb, uint8_t* reduced, int num_pixels, int gr_weight) {
+    gr_weight = gr_weight % 256;
+    int img_weight = 255 - gr_weight;
 	num_pixels /= 8;
-	// Duplicate the weight 8 times.
-	uint8x8_t w_r = vdup_n_u8(77);
-	uint8x8_t w_g = vdup_n_u8(150);
-	uint8x8_t w_b = vdup_n_u8(29);
-	// For intermediate results. 16-bit/pixel to avoid overflow.
-	uint16x8_t temp;
-	// For the converted grayscale values.
-	uint8x8_t result;
-	auto t1_neon = chrono::high_resolution_clock::now();
-	for(int i=0; i<num_pixels; ++i, rgb+=8*3, gray+=8) {
-	// Load 8 pixels into 3 64-bit registers, split by channel.
-	uint8x8x3_t src = vld3_u8(rgb);
-	// Multiply all eight red pixels by the corresponding weights.
-	temp = vmull_u8(src.val[0], w_r);
-	// Combined multiply and addition.
-	temp = vmlal_u8(temp, src.val[1], w_g);
-	temp = vmlal_u8(temp, src.val[2], w_b);
-	// Shift right by 8, "narrow" to 8-bits (recall temp is 16-bit).
-	result = vshrn_n_u16(temp, 8);
-	// Store converted pixels in the output grayscale image.
-	vst1_u8(gray, result);
-	}
+	uint8x8_t gr_w = vdup_n_u8(gr_weight);
+	uint8x8_t img_w = vdup_n_u8(img_weight);
+	uint8x8_t w_gr = vdup_n_u8(85);
 
+	uint16x8_t temp;
+	uint8x8_t temp_result;
+	auto t1_neon = chrono::high_resolution_clock::now();
+	for(int i=0; i<num_pixels; i+=3, rgb+=8*3, reduced+=8*3) {
+        uint8x8x3_t src = vld3_u8(rgb);
+        temp = vmull_u8(src.val[0], w_gr);
+        temp = vmlal_u8(temp, src.val[1], w_gr);
+        temp = vmlal_u8(temp, src.val[2], w_gr);
+        temp_result = vshrn_n_u16(temp, 8);
+
+        src.val[0] = vshrn_n_u16(
+                vmull_u8(src.val[0], img_w) + vmull_u8(temp_result, gr_w), 8); 
+        src.val[1] = vshrn_n_u16(
+                vmull_u8(src.val[1], img_w) + vmull_u8(temp_result, gr_w), 8); 
+        src.val[2] = vshrn_n_u16(
+                vmull_u8(src.val[2], img_w) + vmull_u8(temp_result, gr_w), 8); 
+
+        vst3_u8(reduced, src);
+	}
 	auto t2_neon = chrono::high_resolution_clock::now();
 	auto duration_neon = chrono::duration_cast<chrono::microseconds>(t2_neon-t1_neon).count();
-	cout << "inside function rgb_to_gray_neon" << endl;
-	cout << duration_neon << " us" << endl;
+	cout << "rgb_with_graymask_neon8\t" << to_string(gr_weight) << "\t" << duration_neon << endl;
 }
 
 int main(int argc,char** argv)
 {
 	uint8_t * rgb_arr;
-	uint8_t * gray_arr_neon;
+	uint8_t * rgb_graymask;
+	uint8_t * rgb_graymask_neon;
 
-	if (argc != 2) {
-		cout << "Usage: opencv_neon image_name" << endl;
+	if (argc != 3) {
+		cout << "Usage: opencv_neon image_name grayscale_weight" << endl;
 		return -1;
 	}
 
 	Mat rgb_image;
 	rgb_image = imread(argv[1], IMREAD_COLOR);
+    int gr_weight = atoi(argv[2]);
+
 	if (!rgb_image.data) {
 		cout << "Could not open the image" << endl;
 		return -1;
@@ -80,18 +87,18 @@ int main(int argc,char** argv)
 	int width = rgb_image.cols;
 	int height = rgb_image.rows;
 	int num_pixels = width*height;
-	Mat gray_image_neon(height, width, CV_8UC1, Scalar(0));
-	gray_arr_neon = gray_image_neon.data;
+	int num_pixels_RGB = width*height*3;
+
+	Mat rgb_graymask_mat_neon(height, width, CV_8UC3, Scalar(0, 0, 0));
+	rgb_graymask_neon = rgb_graymask_mat_neon.data;
+    rgb_with_graymask_neon8(rgb_arr, rgb_graymask_neon, num_pixels_RGB, gr_weight);
+	imwrite("graymask_img_neon_" + to_string(gr_weight) + ".png", rgb_graymask_mat_neon);
 
 
-	auto t1_neon = chrono::high_resolution_clock::now();
-	rgb_to_gray_neon(rgb_arr, gray_arr_neon, num_pixels);
-	auto t2_neon = chrono::high_resolution_clock::now();
-	auto duration_neon = chrono::duration_cast<chrono::microseconds>(t2_neon-t1_neon).count();
-	cout << "rgb_to_gray_neon" << endl;
-	cout << duration_neon << " us" << endl;
-
-	imwrite("gray_neon.png", gray_image_neon);
+	Mat rgb_graymask_mat(height, width, CV_8UC3, Scalar(0, 0, 0));
+    rgb_graymask = rgb_graymask_mat.data;
+	rgb_with_graymask(rgb_arr, rgb_graymask, num_pixels_RGB, gr_weight);
+	imwrite("graymask_img_" + to_string(gr_weight) + ".png", rgb_graymask_mat);
 
     return 0;
 }
